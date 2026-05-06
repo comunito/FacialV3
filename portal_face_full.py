@@ -2167,13 +2167,35 @@ SETTINGS_INDEX = """
     </label>
   </div>
 
+
   <p style="margin-top:12px">
     <button class="btn btn-green" name="action" value="embed_run_now">▶ Ejecutar ahora</button>
-    <span class="muted" style="margin-left:8px">{{hb_msg}}</span>
+    <span class="muted" style="margin-left:8px" id="ae-save-msg">{{hb_msg}}</span>
   </p>
-  <div class="status-box">
-    Estado: <b>{{embed_status}}</b><br>
-    Último resultado: {{embed_msg}}
+
+  <!-- Barra de progreso en tiempo real -->
+  <div id="ae-live" style="margin-top:10px">
+    <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px">
+      <span id="ae-status-txt">{{embed_status}}</span>
+      <span id="ae-pct-txt" style="font-weight:700;color:#6366f1"></span>
+    </div>
+    <div style="background:#e2e8f0;border-radius:999px;height:10px;overflow:hidden">
+      <div id="ae-bar" style="background:linear-gradient(90deg,#6366f1,#10b981);height:10px;width:0%;border-radius:999px;transition:width 0.4s ease"></div>
+    </div>
+    <div style="font-size:12px;color:#64748b;margin-top:4px">
+      <span id="ae-current"></span>
+    </div>
+    <!-- Log de últimas acciones -->
+    <div id="ae-log-wrap" style="margin-top:8px;max-height:180px;overflow-y:auto;display:none">
+      <table style="width:100%;font-size:12px;border-collapse:collapse" id="ae-log-tbl">
+        <thead><tr style="background:#f8fafc">
+          <th style="padding:3px 6px;text-align:left">Hora</th>
+          <th style="padding:3px 6px;text-align:left">Nombre</th>
+          <th style="padding:3px 6px;text-align:left">Resultado</th>
+        </tr></thead>
+        <tbody id="ae-log-body"></tbody>
+      </table>
+    </div>
   </div>
 </div>
 
@@ -2182,6 +2204,90 @@ SETTINGS_INDEX = """
   <a class="btn" href="/">← Volver</a>
 </p>
 </form>
+
+<script>
+(function(){
+  var poll = null;
+
+  function startPolling() {
+    if (poll) return;
+    poll = setInterval(fetchStatus, 2000);
+    fetchStatus();
+  }
+
+  function stopPolling() {
+    if (poll) { clearInterval(poll); poll = null; }
+  }
+
+  function fetchStatus() {
+    fetch('/api/embed_status')
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if (!d.ok) return;
+
+        // Texto de estado
+        document.getElementById('ae-status-txt').textContent = d.status;
+
+        // Barra de progreso
+        var pct = d.total > 0 ? d.pct : 0;
+        document.getElementById('ae-bar').style.width = pct + '%';
+        if (d.total > 0) {
+          document.getElementById('ae-pct-txt').textContent =
+            d.done + '/' + d.total + ' (' + pct + '%)  ✅' + d.ok_c + '  ❌' + d.errors;
+        } else {
+          document.getElementById('ae-pct-txt').textContent = '';
+        }
+
+        // Usuario actual
+        var cur = document.getElementById('ae-current');
+        if (d.current) {
+          cur.textContent = '⏳ Ahora: ' + d.current;
+          cur.style.color = '#6366f1';
+        } else {
+          cur.textContent = '';
+        }
+
+        // Log
+        if (d.log && d.log.length > 0) {
+          document.getElementById('ae-log-wrap').style.display = 'block';
+          var tbody = document.getElementById('ae-log-body');
+          tbody.innerHTML = '';
+          // Mostrar del más reciente al más antiguo
+          var rows = d.log.slice().reverse();
+          rows.forEach(function(e){
+            var tr = document.createElement('tr');
+            var color = e.result.indexOf('✅') >= 0 ? '#dcfce7' : '#fee2e2';
+            tr.style.background = color;
+            tr.innerHTML =
+              '<td style="padding:2px 6px">' + e.ts + '</td>' +
+              '<td style="padding:2px 6px;font-weight:600">' + e.name + '</td>' +
+              '<td style="padding:2px 6px">' + e.result + '</td>';
+            tbody.appendChild(tr);
+          });
+        }
+
+        if (!d.running) {
+          stopPolling();
+        }
+      })
+      .catch(function(){ });
+  }
+
+  // Arrancar polling si ya está corriendo al cargar la página
+  fetchStatus();
+  // Si estaba corriendo, iniciar polling continuo
+  fetch('/api/embed_status').then(function(r){ return r.json(); }).then(function(d){
+    if (d.running) startPolling();
+  }).catch(function(){});
+
+  // Cuando se pulsa "Ejecutar ahora", arrancar polling inmediatamente
+  document.querySelectorAll('[value="embed_run_now"]').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      setTimeout(startPolling, 800);
+    });
+  });
+})();
+</script>
 """
 
 
@@ -3294,22 +3400,38 @@ def api_faces_batch_enroll():
 
 @app.route("/api/faces/batch_status/<job_id>")
 def api_faces_batch_status(job_id):
-    """Consulta el progreso de un job de batch.
-    Cuando 'running' sea false, 'results' tiene todos los embeddings listos para copiar al Sheet."""
+    """Consulta el progreso de un job de batch."""
     job = _batch_jobs.get(job_id)
     if not job:
         return jsonify({"ok": False, "error": "job_id not found"}), 404
-
     pct = round(job["done"] / max(job["total"], 1) * 100, 1)
     return jsonify({
-        "ok": True,
-        "job_id": job_id,
-        "running": job["running"],
-        "total": job["total"],
-        "done": job["done"],
-        "pct": pct,
-        "errors": job["errors"],
-        "results": job["results"] if not job["running"] else []
+        "ok": True, "job_id": job_id, "running": job["running"],
+        "total": job["total"], "done": job["done"], "pct": pct,
+        "errors": job["errors"], "results": job["results"] if not job["running"] else []
+    })
+
+
+@app.route("/api/embed_status")
+def api_embed_status():
+    """Endpoint de polling en tiempo real para el procesador de embeddings."""
+    with _ae_lock:
+        s = dict(_ae_state)
+        log = list(s.get("log", []))
+    total = max(s.get("total", 0), 1)
+    done  = s.get("done", 0)
+    pct   = round(done / total * 100, 1)
+    return jsonify({
+        "ok":      True,
+        "running": s.get("running", False),
+        "status":  s.get("status",  "—"),
+        "current": s.get("current", ""),
+        "total":   s.get("total",   0),
+        "done":    done,
+        "ok_c":    s.get("ok",      0),
+        "errors":  s.get("errors",  0),
+        "pct":     pct,
+        "log":     log[-15:],  # últimas 15 entradas
     })
 
 @app.route("/api/debug")
@@ -3564,21 +3686,41 @@ def api_wifi_connect():
     return jsonify({"ok":(code==0), "error":out if code!=0 else ""})
 
 # ----- Auto-Embed Processor -----
-_ae_state   = {"status": "Inactivo", "last_msg": "—"}
+_ae_state = {
+    "status":   "Inactivo",
+    "last_msg": "—",
+    "running":  False,
+    "total":    0,
+    "done":     0,
+    "ok":       0,
+    "errors":   0,
+    "current":  "",       # nombre del usuario que se está procesando ahora
+    "log":      [],       # lista de últimas entradas [{ts, name, result}]
+}
 _ae_trigger = threading.Event()
+_ae_lock    = threading.Lock()
+
+def _ae_log(name: str, result: str):
+    """Añade una entrada al log circular (máx 50 entradas)."""
+    entry = {
+        "ts":     datetime.datetime.now(TZ).strftime("%H:%M:%S"),
+        "name":   name,
+        "result": result,
+    }
+    with _ae_lock:
+        _ae_state["log"].append(entry)
+        if len(_ae_state["log"]) > 50:
+            _ae_state["log"] = _ae_state["log"][-50:]
 
 def _gdrive_direct_url(url: str) -> str:
     """Convierte URL de vista previa de Drive a URL de descarga directa."""
-    # Formato: https://drive.google.com/file/d/FILE_ID/view
     m = re.search(r"/d/([a-zA-Z0-9_-]+)", url)
     if m:
-        fid = m.group(1)
-        return f"https://drive.google.com/uc?export=download&id={fid}"
-    # Formato: https://drive.google.com/open?id=FILE_ID
+        return f"https://drive.google.com/uc?export=download&id={m.group(1)}"
     m2 = re.search(r"[?&]id=([a-zA-Z0-9_-]+)", url)
     if m2:
         return f"https://drive.google.com/uc?export=download&id={m2.group(1)}"
-    return url  # ya es descargable
+    return url
 
 def _auto_embed_loop():
     """Hilo de segundo plano: busca solicitudes sin procesar y genera embeddings."""
@@ -3586,92 +3728,129 @@ def _auto_embed_loop():
     while True:
         ae = cfg.get("auto_embed", {})
         interval = int(ae.get("interval_min", 10)) * 60
-        # Esperar el intervalo O hasta que se dispare manualmente
         _ae_trigger.wait(timeout=interval)
         _ae_trigger.clear()
 
         ae = cfg.get("auto_embed", {})
         if not ae.get("enabled") or not ae.get("requests_csv"):
-            _ae_state["status"] = "Inactivo (no configurado)"
+            _ae_state["status"]  = "Inactivo (activa el procesamiento y configura la URL)"
+            _ae_state["running"] = False
             continue
 
-        _ae_state["status"] = "Procesando..."
-        csv_url = ae["requests_csv"]
-        # Normalizar URL de Sheets a CSV export
-        csv_url = _sheets_to_csv(csv_url)
-        col_c   = int(ae.get("col_code",   1)) - 1
-        col_n   = int(ae.get("col_name",   2)) - 1
-        col_r   = int(ae.get("col_rel",    3)) - 1
-        col_p   = int(ae.get("col_photo",  4)) - 1
-        col_s   = int(ae.get("col_status", 5)) - 1
-        webhook = ae.get("whitelist_webhook", "")
+        # Reset estado
+        _ae_state["running"]  = True
+        _ae_state["done"]     = 0
+        _ae_state["ok"]       = 0
+        _ae_state["errors"]   = 0
+        _ae_state["current"]  = ""
+        _ae_state["status"]   = "📥 Descargando hoja de solicitudes..."
+
+        csv_url   = _sheets_to_csv(ae["requests_csv"])
+        col_c     = int(ae.get("col_code",   1)) - 1
+        col_n     = int(ae.get("col_name",   2)) - 1
+        col_p     = int(ae.get("col_photo",  4)) - 1
+        col_s     = int(ae.get("col_status", 5)) - 1
+        webhook   = ae.get("whitelist_webhook", "")
         embed_col = int(ae.get("embed_col", 14))
 
-        # Descargar hoja de solicitudes
+        # Descargar CSV
         try:
             resp = requests.get(csv_url, timeout=20)
             resp.raise_for_status()
             rows = list(csv.reader(io.StringIO(resp.text)))
         except Exception as e:
-            _ae_state["status"] = f"Error descargando CSV: {e}"
-            _ae_state["last_msg"] = str(e)
+            _ae_state["status"]  = f"❌ Error descargando CSV: {e}"
+            _ae_state["last_msg"]= str(e)
+            _ae_state["running"] = False
             continue
 
-        pending = [r for r in rows if len(r) > col_s and
-                   r[col_s].strip().lower() in ("sin procesar", "sinprocesar", "pendiente", "")]
-        if not pending:
-            _ae_state["status"] = f"Sin pendientes ({datetime.datetime.now(TZ).strftime('%H:%M')})"
-            _ae_state["last_msg"] = "Todo procesado."
+        # Filtrar pendientes — excluir fila de cabecera y filas completamente vacías
+        pending = []
+        for i, r in enumerate(rows):
+            if i == 0:
+                continue  # saltar encabezado
+            if len(r) <= col_s:
+                continue
+            status_val = r[col_s].strip().lower()
+            if status_val in ("sin procesar", "sinprocesar", "pendiente"):
+                pending.append(r)
+            # NO incluir vacío "" para evitar falsos positivos
+
+        total = len(pending)
+        _ae_state["total"] = total
+
+        if total == 0:
+            ts = datetime.datetime.now(TZ).strftime("%H:%M")
+            _ae_state["status"]  = f"✅ Sin pendientes — última revisión {ts}"
+            _ae_state["last_msg"]= "Todas las solicitudes están procesadas."
+            _ae_state["running"] = False
             continue
 
-        ok_count = err_count = 0
-        for row in pending:
+        _ae_state["status"] = f"⚙️ Procesando {total} solicitudes..."
+
+        for idx, row in enumerate(pending):
+            code_val  = row[col_c].strip() if len(row) > col_c else ""
+            name_val  = row[col_n].strip() if len(row) > col_n else f"Fila {idx+2}"
+            photo_url = row[col_p].strip() if len(row) > col_p else ""
+
+            _ae_state["current"] = f"{name_val} ({code_val})"
+            _ae_state["status"]  = (
+                f"⚙️ Procesando {idx+1}/{total}: {name_val}"
+            )
+
             try:
-                code_val  = row[col_c].strip() if len(row) > col_c else ""
-                name_val  = row[col_n].strip() if len(row) > col_n else ""
-                photo_url = row[col_p].strip() if len(row) > col_p else ""
                 if not photo_url or not code_val:
-                    err_count += 1
-                    continue
+                    raise ValueError("Código o URL de foto vacíos")
 
                 # Descargar foto de Drive
-                dl_url = _gdrive_direct_url(photo_url)
-                img_resp = requests.get(dl_url, timeout=20)
+                dl_url   = _gdrive_direct_url(photo_url)
+                img_resp = requests.get(dl_url, timeout=25)
                 img_resp.raise_for_status()
                 img_bytes = img_resp.content
 
                 # Generar embedding
                 nparr = np.frombuffer(img_bytes, np.uint8)
-                img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                img   = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
                 if img is None:
-                    raise ValueError("imagen inválida")
+                    raise ValueError("Imagen inválida o formato no soportado")
                 faces = get_faces(img, resize_max_w=640)
                 if not faces:
-                    raise ValueError("no se detectó rostro")
+                    raise ValueError("No se detectó ningún rostro")
                 feat_str = str(faces[0]["feature"].tolist()).replace(" ", "")
 
-                # Llamar al webhook de Apps Script para guardar
+                # Enviar al webhook de Apps Script
                 if webhook:
-                    payload = {
-                        "action": "set_embedding",
-                        "codigo": code_val,
-                        "nombre": name_val,
+                    payload  = {
+                        "action":    "set_embedding",
+                        "codigo":    code_val,
+                        "nombre":    name_val,
                         "embedding": feat_str,
-                        "embed_col": embed_col
+                        "embed_col": embed_col,
                     }
-                    wh_resp = requests.post(webhook, json=payload, timeout=20)
+                    wh_resp = requests.post(webhook, json=payload, timeout=25)
                     wh_resp.raise_for_status()
+                    wh_data = wh_resp.json()
+                    if not wh_data.get("ok"):
+                        raise ValueError(f"Apps Script: {wh_data.get('error','?')}")
 
-                ok_count += 1
-                time.sleep(0.5)  # pequeña pausa para no saturar Drive/Sheets
+                _ae_state["ok"] += 1
+                _ae_log(name_val, "✅ OK")
 
             except Exception as ex:
-                err_count += 1
-                _ae_state["last_msg"] = f"Error en {row[col_c] if len(row)>col_c else '?'}: {ex}"
+                _ae_state["errors"] += 1
+                _ae_log(name_val, f"❌ {ex}")
+
+            _ae_state["done"] = idx + 1
+            time.sleep(0.3)  # micro-pausa para no saturar Drive/Sheets
 
         ts = datetime.datetime.now(TZ).strftime("%H:%M")
-        _ae_state["status"] = f"Último ciclo {ts}: ✅ {ok_count} ok | ❌ {err_count} errores"
-        _ae_state["last_msg"] = f"Procesados {ok_count}/{len(pending)} solicitudes"
+        ok_c  = _ae_state["ok"]
+        err_c = _ae_state["errors"]
+        _ae_state["status"]   = f"✅ Ciclo terminado {ts} — {ok_c} ok · {err_c} errores de {total}"
+        _ae_state["last_msg"] = f"Último ciclo: {ok_c}/{total} procesados correctamente."
+        _ae_state["current"]  = ""
+        _ae_state["running"]  = False
+
 
 # ----- Threads -----
 for i in (1,2):
