@@ -104,6 +104,9 @@ def _gs_url(s: str) -> str:
         return s
     return f"https://docs.google.com/spreadsheets/d/{s}/export?format=csv"
 
+# Alias usado en el auto-embed processor
+_sheets_to_csv = _gs_url
+
 def col_to_idx(x, fb=None):
     if x is None: return fb
     s=str(x).strip()
