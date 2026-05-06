@@ -4,9 +4,9 @@ set -euo pipefail
 echo "==> Comunito Portal: instalador base (GitHub)"
 
 ME="$(whoami)"
-APP_DIR="/home/$ME/comunito_portal"
+APP_DIR="/home/$ME/comunito_facial"
 VENV="$APP_DIR/comunito-venv"
-SVC="/etc/systemd/system/comunito-portal.service"
+SVC="/etc/systemd/system/comunito-facial.service"
 
 echo "==> 1) Paquetes base"
 sudo apt-get update
@@ -40,19 +40,20 @@ source "$VENV/bin/activate"
 python -m pip install --upgrade pip wheel setuptools
 pip install -r "$APP_DIR/requirements.txt"
 
-echo "==> 3.1) Validar fast_alpr"
+echo "==> 3.1) Validar Motores OpenCV (Face)"
 python - <<'PYCHK'
 import sys
 try:
-    from fast_alpr import ALPR
-    print("[OK] import fast_alpr")
-    alpr = ALPR(
-        detector_model="yolo-v9-t-384-license-plate-end2end",
-        ocr_model="cct-xs-v1-global-model"
+    import cv2
+    detector = cv2.FaceDetectorYN.create(
+        "models/face_detection_yunet.onnx", "", (320, 320)
     )
-    print("[OK] ALPR engine listo")
+    recognizer = cv2.FaceRecognizerSF.create(
+        "models/face_recognition_sface.onnx", ""
+    )
+    print("[OK] OpenCV Face Recognition Engine Listo")
 except Exception as e:
-    print("[ERROR] fast_alpr no quedó operativo:", e)
+    print("[ERROR] Motores faciales no operativos:", e)
     sys.exit(1)
 PYCHK
 
@@ -80,17 +81,17 @@ sudo systemctl enable tailscaled --now || true
 echo "==> Tailscale instalado. Después ejecuta: sudo tailscale up"
 
 echo "==> 7) Instalar systemd service"
-sudo cp "$APP_DIR/systemd/comunito-portal.service" "$SVC"
+sudo cp "$APP_DIR/systemd/comunito-facial.service" "$SVC"
 sudo sed -i "s|^User=.*|User=$ME|g" "$SVC"
 sudo sed -i "s|/home/pi|/home/$ME|g" "$SVC"
 
 echo "==> 8) Habilitar servicio"
 sudo systemctl daemon-reload
-sudo systemctl enable comunito-portal.service --now
+sudo systemctl enable comunito-facial.service --now
 
 IP_NOW="$(hostname -I | awk '{print $1}')"
 echo
 echo "==> Listo:"
-echo "    Portal:   http://$IP_NOW:5000"
-echo "    Settings: http://$IP_NOW:5000/settings"
+echo "    Portal Facial: http://$IP_NOW:5001"
+echo "    Settings:      http://$IP_NOW:5001/settings"
 echo "    Tailscale: ejecuta sudo tailscale up"
