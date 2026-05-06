@@ -8,9 +8,10 @@ TimeoutStartSec=0
 Type=simple
 User=pi
 WorkingDirectory=/home/pi/comunito_facial
-ExecStart=/home/pi/comunito_facial/venv/bin/python portal_face_full.py
+ExecStart=/home/pi/comunito_facial/comunito-venv/bin/python portal_face_full.py
 Restart=always
-RestartSec=3
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
 
 [Install]
 WantedBy=multi-user.target
