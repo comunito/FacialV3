@@ -85,8 +85,7 @@ echo "==> Tailscale instalado. Después ejecuta: sudo tailscale up"
 
 echo "==> 7) Instalar systemd service"
 sudo cp "$APP_DIR/systemd/comunito-facial.service" "$SVC"
-sudo sed -i "s|^User=.*|User=$ME|g" "$SVC"
-sudo sed -i "s|/home/pi|/home/$ME|g" "$SVC"
+sudo sed -i "s|USER_PLACEHOLDER|$ME|g" "$SVC"
 
 echo "==> 8) Habilitar servicio"
 sudo systemctl daemon-reload
