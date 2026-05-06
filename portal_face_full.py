@@ -3491,7 +3491,7 @@ def api_embed_test():
             result["html_preview"] = content[:400]
             return jsonify(result)
 
-        rows = list(csv.reader(io.StringIO(content)))
+        rows = list(csv.reader(io.StringIO(resp.content.decode("utf-8", errors="replace"))))
         ae_cfg  = cfg.get("auto_embed", {})
         col_s   = int(ae_cfg.get("col_status", 5)) - 1
         col_n   = int(ae_cfg.get("col_name",   2)) - 1
@@ -3825,7 +3825,7 @@ def _auto_embed_loop():
                 headers={"User-Agent": "Mozilla/5.0"}
             )
             resp.raise_for_status()
-            content = resp.text
+            content = resp.content.decode("utf-8", errors="replace")
             # Detectar redirect a login de Google (página HTML en vez de CSV)
             if "<html" in content[:300].lower():
                 _ae_state["status"]  = "❌ La hoja NO es pública en Google Sheets"
