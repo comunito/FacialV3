@@ -40,9 +40,12 @@ source "$VENV/bin/activate"
 python -m pip install --upgrade pip wheel setuptools
 pip install -r "$APP_DIR/requirements.txt"
 
+cd "$APP_DIR"
+
 echo "==> 3.1) Validar Motores OpenCV (Face)"
-python - <<'PYCHK'
-import sys
+python - <<PYCHK
+import sys, os
+os.chdir("$APP_DIR")
 try:
     import cv2
     detector = cv2.FaceDetectorYN.create(
