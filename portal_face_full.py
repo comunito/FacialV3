@@ -3258,6 +3258,29 @@ def api_tag_event():
 
     return jsonify({"ok":True,"active":bool(auth),"category":cat,"user_type":user_type})
 
+# ── Auto-Embed globals (definidos aquí para que estén disponibles en los endpoints) ──
+_ae_state = {
+    "status":   "Inactivo",
+    "last_msg": "—",
+    "running":  False,
+    "total":    0,
+    "done":     0,
+    "ok":       0,
+    "errors":   0,
+    "current":  "",
+    "log":      [],
+}
+_ae_trigger = threading.Event()
+_ae_lock    = threading.Lock()
+
+def _ae_log(name: str, result: str):
+    entry = {"ts": datetime.datetime.now(TZ).strftime("%H:%M:%S"), "name": name, "result": result}
+    with _ae_lock:
+        _ae_state["log"].append(entry)
+        if len(_ae_state["log"]) > 50:
+            _ae_state["log"] = _ae_state["log"][-50:]
+
+
 
 @app.route("/api/faces/enroll", methods=["POST"])
 def api_faces_enroll():
@@ -3490,8 +3513,8 @@ def api_embed_test():
         result["pending_names"] = pending[:10]  # primeros 10
         result["sample_row2"]   = rows[1] if len(rows) > 1 else []
 
-    except requests.Timeout:
-        result["error"] = "Timeout (15s) — la hoja puede ser privada o la URL incorrecta"
+    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
+        result["error"] = "Timeout/Error de red (15s) — la hoja puede ser privada o la URL incorrecta"
     except Exception as e:
         result["error"] = str(e)
 
@@ -3750,31 +3773,7 @@ def api_wifi_connect():
     return jsonify({"ok":(code==0), "error":out if code!=0 else ""})
 
 # ----- Auto-Embed Processor -----
-_ae_state = {
-    "status":   "Inactivo",
-    "last_msg": "—",
-    "running":  False,
-    "total":    0,
-    "done":     0,
-    "ok":       0,
-    "errors":   0,
-    "current":  "",       # nombre del usuario que se está procesando ahora
-    "log":      [],       # lista de últimas entradas [{ts, name, result}]
-}
-_ae_trigger = threading.Event()
-_ae_lock    = threading.Lock()
-
-def _ae_log(name: str, result: str):
-    """Añade una entrada al log circular (máx 50 entradas)."""
-    entry = {
-        "ts":     datetime.datetime.now(TZ).strftime("%H:%M:%S"),
-        "name":   name,
-        "result": result,
-    }
-    with _ae_lock:
-        _ae_state["log"].append(entry)
-        if len(_ae_state["log"]) > 50:
-            _ae_state["log"] = _ae_state["log"][-50:]
+# (_ae_state, _ae_trigger, _ae_lock, _ae_log definidos antes de las rutas)
 
 def _gdrive_direct_url(url: str) -> str:
     """Convierte URL de vista previa de Drive a URL de descarga directa."""
@@ -3835,12 +3834,11 @@ def _auto_embed_loop():
                 _ae_state["running"] = False
                 continue
             rows = list(csv.reader(io.StringIO(content)))
-        except requests.Timeout:
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
             _ae_state["status"]  = "❌ Timeout descargando CSV (15s) — revisa la URL"
             _ae_state["last_msg"]= "Timeout"
             _ae_state["running"] = False
             continue
-
         except Exception as e:
             _ae_state["status"]  = f"❌ Error descargando CSV: {e}"
             _ae_state["last_msg"]= str(e)
