@@ -3434,6 +3434,70 @@ def api_embed_status():
         "log":     log[-15:],  # últimas 15 entradas
     })
 
+
+@app.route("/api/embed_test")
+def api_embed_test():
+    """Diagnóstico: prueba la descarga del CSV de solicitudes y muestra qué encuentra."""
+    import csv, io
+    ae      = cfg.get("auto_embed", {})
+    raw_url = ae.get("requests_csv", "")
+    if not raw_url:
+        return jsonify({"ok": False, "error": "No hay URL configurada en 'requests_csv'"})
+
+    csv_url = _sheets_to_csv(raw_url)
+    result  = {"ok": False, "raw_url": raw_url, "csv_url": csv_url}
+
+    try:
+        resp = requests.get(
+            csv_url,
+            timeout=15,
+            allow_redirects=True,
+            headers={"User-Agent": "Mozilla/5.0"}
+        )
+        result["http_status"] = resp.status_code
+        result["content_type"] = resp.headers.get("Content-Type", "?")
+        content = resp.text
+
+        # Detectar si Google devolvió una página de login en vez del CSV
+        if "<html" in content[:500].lower():
+            result["error"] = (
+                "Google devolvió HTML en vez de CSV. "
+                "La hoja NO es pública. Ve a Google Sheets → Compartir → "
+                "'Cualquier persona con el enlace' → Viewer."
+            )
+            result["html_preview"] = content[:400]
+            return jsonify(result)
+
+        rows = list(csv.reader(io.StringIO(content)))
+        ae_cfg  = cfg.get("auto_embed", {})
+        col_s   = int(ae_cfg.get("col_status", 5)) - 1
+        col_n   = int(ae_cfg.get("col_name",   2)) - 1
+
+        # Contar pendientes
+        pending = []
+        for i, r in enumerate(rows):
+            if i == 0: continue
+            if len(r) <= col_s: continue
+            sv = r[col_s].strip().lower()
+            if sv in ("sin procesar", "sinprocesar", "pendiente"):
+                name = r[col_n].strip() if len(r) > col_n else f"Fila {i+1}"
+                pending.append(name)
+
+        result["ok"]            = True
+        result["total_rows"]    = len(rows)
+        result["header"]        = rows[0] if rows else []
+        result["pending_count"] = len(pending)
+        result["pending_names"] = pending[:10]  # primeros 10
+        result["sample_row2"]   = rows[1] if len(rows) > 1 else []
+
+    except requests.Timeout:
+        result["error"] = "Timeout (15s) — la hoja puede ser privada o la URL incorrecta"
+    except Exception as e:
+        result["error"] = str(e)
+
+    return jsonify(result)
+
+
 @app.route("/api/debug")
 def api_alpr_debug():
     cam=1
@@ -3753,11 +3817,30 @@ def _auto_embed_loop():
         webhook   = ae.get("whitelist_webhook", "")
         embed_col = int(ae.get("embed_col", 14))
 
-        # Descargar CSV
+        # Descargar CSV con manejo robusto
         try:
-            resp = requests.get(csv_url, timeout=20)
+            resp = requests.get(
+                csv_url,
+                timeout=15,
+                allow_redirects=True,
+                headers={"User-Agent": "Mozilla/5.0"}
+            )
             resp.raise_for_status()
-            rows = list(csv.reader(io.StringIO(resp.text)))
+            content = resp.text
+            # Detectar redirect a login de Google (página HTML en vez de CSV)
+            if "<html" in content[:300].lower():
+                _ae_state["status"]  = "❌ La hoja NO es pública en Google Sheets"
+                _ae_state["last_msg"]= ("Ve a Google Sheets → Compartir → "
+                                        "'Cualquier persona con el enlace' → Viewer")
+                _ae_state["running"] = False
+                continue
+            rows = list(csv.reader(io.StringIO(content)))
+        except requests.Timeout:
+            _ae_state["status"]  = "❌ Timeout descargando CSV (15s) — revisa la URL"
+            _ae_state["last_msg"]= "Timeout"
+            _ae_state["running"] = False
+            continue
+
         except Exception as e:
             _ae_state["status"]  = f"❌ Error descargando CSV: {e}"
             _ae_state["last_msg"]= str(e)
