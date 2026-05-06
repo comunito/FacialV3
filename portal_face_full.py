@@ -223,7 +223,20 @@ DEFAULTS = {
     "api_token": "",
     "monitor_enabled": False,
     "monitor_url": "",
-    "monitor_period_min": 0
+    "monitor_period_min": 0,
+    # Auto-procesador de embeddings (Hoja de solicitudes -> whitelist)
+    "auto_embed": {
+        "enabled": False,
+        "interval_min": 10,
+        "requests_csv": "",      # URL publica CSV de la hoja de solicitudes
+        "col_code": 1,           # Columna 1: Codigo de vivienda
+        "col_name": 2,           # Columna 2: Nombre
+        "col_rel": 3,            # Columna 3: Parentesco
+        "col_photo": 4,          # Columna 4: URL foto en Drive
+        "col_status": 5,         # Columna 5: Estatus (sin procesar / Procesado)
+        "whitelist_webhook": "", # URL del Apps Script que escribe en la whitelist
+        "embed_col": 14,         # Columna de la whitelist donde se guarda el embedding
+    }
 }
 
 def load_cfg():
@@ -2060,11 +2073,16 @@ def _pair_get(p, k, fb=""):
 SETTINGS_INDEX = """
 <style>
  body{font-family:system-ui;margin:18px;background:#fafafa}
- .card{border:1px solid #ddd;border-radius:12px;padding:14px;max-width:980px;background:#fff}
- .btn{padding:8px 12px;border:1px solid #888;border-radius:10px;background:#f5f5f5;cursor:pointer}
+ .card{border:1px solid #ddd;border-radius:12px;padding:16px;max-width:980px;background:#fff;margin-bottom:16px}
+ .card-blue{border-color:#6366f1}
+ .btn{padding:8px 12px;border:1px solid #888;border-radius:10px;background:#f5f5f5;cursor:pointer;font-weight:600}
+ .btn-green{background:#10b981;color:#fff;border-color:#059669}
  input[type="text"],input[type="number"]{padding:6px 8px;border-radius:8px;border:1px solid #bbb;min-width:260px}
  label{display:block;margin:6px 0}
  .muted{color:#666;font-size:12px}
+ .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px 24px}
+ .tag{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700;background:#e0f2fe;color:#0369a1;margin-left:6px}
+ .status-box{background:#f1f5f9;border-radius:8px;padding:8px 12px;font-size:13px;margin-top:6px}
 </style>
 <h2>Settings</h2>
 <div class="card">
@@ -2076,36 +2094,96 @@ SETTINGS_INDEX = """
     <a class="btn" href="/settings/2">⚙️ Cam 2</a>
     <a class="btn" href="/roi?cam=2" target="_blank">✂ ROI 2</a>
   </p>
-  <hr>
-  <form method="post">
-    <h3>Seguridad</h3>
-    <label>API Token (X-API-Key / ?api_key=):
-      <input type="text" name="api_token" value="{{api_token}}" placeholder="opcional">
-    </label>
-    <h3>Monitor (opcional)</h3>
-    <label><input type="checkbox" name="monitor_enabled" {{'checked' if monitor_enabled else ''}}> Enviar heartbeat</label>
-    <label>Monitor URL:
-      <input type="text" name="monitor_url" value="{{monitor_url}}" placeholder="https://...">
-    </label>
-    <label>Periodo (min):
-      <input type="number" step="1" name="monitor_period_min" value="{{monitor_period_min}}">
-    </label>
-    
-    <p>
-      <button class="btn" name="action" value="heartbeat_test">📡 Probar heartbeat ahora</button>
-      <span class="muted">{{hb_msg}}</span>
-    </p>
-    <p class="muted">
-      Último OK: <b>{{hb_last_ok}}</b> • Último intento: <b>{{hb_last_try}}</b> • Code: <b>{{hb_last_code}}</b> • Error: <b>{{hb_last_err}}</b>
-    </p>
-<p class="muted">El heartbeat incluye temp/cpu/colas y último estado por cámara.</p>
-    <p style="margin-top:10px">
-      <button class="btn">Guardar</button>
-      <a class="btn" href="/">Volver</a>
-    </p>
-  </form>
 </div>
+
+<form method="post">
+<div class="card">
+  <h3>🔐 Seguridad</h3>
+  <label>API Token (X-API-Key / ?api_key=):
+    <input type="text" name="api_token" value="{{api_token}}" placeholder="opcional">
+  </label>
+  <h3>📡 Monitor / Heartbeat</h3>
+  <label><input type="checkbox" name="monitor_enabled" {{'checked' if monitor_enabled else ''}}> Enviar heartbeat</label>
+  <label>Monitor URL:
+    <input type="text" name="monitor_url" value="{{monitor_url}}" placeholder="https://...">
+  </label>
+  <label>Periodo (min):
+    <input type="number" step="1" name="monitor_period_min" value="{{monitor_period_min}}">
+  </label>
+  <p>
+    <button class="btn" name="action" value="heartbeat_test">📡 Probar heartbeat ahora</button>
+    <span class="muted">{{hb_msg}}</span>
+  </p>
+  <p class="muted">
+    Último OK: <b>{{hb_last_ok}}</b> • Último intento: <b>{{hb_last_try}}</b> •
+    Code: <b>{{hb_last_code}}</b> • Error: <b>{{hb_last_err}}</b>
+  </p>
+</div>
+
+<div class="card card-blue">
+  <h3>🧬 Procesador de Embeddings <span class="tag">FACIAL AUTO</span></h3>
+  <p class="muted">
+    La Pi consulta una hoja de solicitudes cada X minutos. Si encuentra filas con estatus
+    <b>"sin procesar"</b>, descarga la foto de Drive, genera el vector biométrico y llama
+    al webhook de Apps Script para escribirlo en la whitelist y marcarlo como <b>Procesado</b>.<br>
+    Procesa ~50/día sin impactar el reconocimiento en vivo.
+  </p>
+
+  <label><input type="checkbox" name="auto_embed_enabled" {{'checked' if ae.enabled else ''}}> Activar procesamiento automático</label>
+
+  <div class="grid2" style="margin-top:10px">
+    <label>⏱ Consultar cada (min):
+      <input type="number" step="1" min="1" name="auto_embed_interval_min" value="{{ae.interval_min}}">
+    </label>
+    <div></div>
+
+    <label style="grid-column:1/-1">📋 URL del Sheet de <b>Solicitudes</b> (visible para leer, público o compartido):<br>
+      <input type="text" name="auto_embed_requests_csv" value="{{ae.requests_csv}}"
+             placeholder="https://docs.google.com/spreadsheets/d/ID/..." style="min-width:95%">
+    </label>
+
+    <label>Col 1 — Código vivienda <small>(número)</small>:
+      <input type="number" min="1" name="auto_embed_col_code" value="{{ae.col_code}}">
+    </label>
+    <label>Col 2 — Nombre usuario:
+      <input type="number" min="1" name="auto_embed_col_name" value="{{ae.col_name}}">
+    </label>
+    <label>Col 3 — Parentesco:
+      <input type="number" min="1" name="auto_embed_col_rel" value="{{ae.col_rel}}">
+    </label>
+    <label>Col 4 — URL foto en Drive:
+      <input type="number" min="1" name="auto_embed_col_photo" value="{{ae.col_photo}}">
+    </label>
+    <label>Col 5 — Estatus (sin procesar/Procesado):
+      <input type="number" min="1" name="auto_embed_col_status" value="{{ae.col_status}}">
+    </label>
+
+    <label style="grid-column:1/-1">🔗 Webhook Apps Script (escribe embedding + marca Procesado):<br>
+      <input type="text" name="auto_embed_whitelist_webhook" value="{{ae.whitelist_webhook}}"
+             placeholder="https://script.google.com/macros/s/.../exec" style="min-width:95%">
+    </label>
+    <label>📌 Columna en la whitelist donde guardar el embedding:
+      <input type="number" min="1" name="auto_embed_embed_col" value="{{ae.embed_col}}">
+    </label>
+  </div>
+
+  <p style="margin-top:12px">
+    <button class="btn btn-green" name="action" value="embed_run_now">▶ Ejecutar ahora</button>
+    <span class="muted" style="margin-left:8px">{{hb_msg}}</span>
+  </p>
+  <div class="status-box">
+    Estado: <b>{{embed_status}}</b><br>
+    Último resultado: {{embed_msg}}
+  </div>
+</div>
+
+<p>
+  <button class="btn">Guardar todo</button>
+  <a class="btn" href="/">← Volver</a>
+</p>
+</form>
 """
+
 
 def _pair_block(prefix, pair):
     # prefix: string for input names
@@ -2422,11 +2500,25 @@ def settings_index():
         cfg["monitor_enabled"]=bool(request.form.get("monitor_enabled"))
         cfg["monitor_url"]=(request.form.get("monitor_url") or "").strip()
         cfg["monitor_period_min"]=_clampi(request.form.get("monitor_period_min", cfg.get("monitor_period_min",0)),0,1440,cfg.get("monitor_period_min",0))
+
+        # Auto-embed settings
+        _ae = cfg.setdefault("auto_embed", deepcopy(DEFAULTS["auto_embed"]))
+        _ae["enabled"]           = bool(request.form.get("auto_embed_enabled"))
+        _ae["interval_min"]      = _clampi(request.form.get("auto_embed_interval_min",   _ae["interval_min"]),   1, 1440, _ae["interval_min"])
+        _ae["requests_csv"]      = (request.form.get("auto_embed_requests_csv") or "").strip()
+        _ae["col_code"]          = _clampi(request.form.get("auto_embed_col_code",        _ae["col_code"]),       1, 100,  _ae["col_code"])
+        _ae["col_name"]          = _clampi(request.form.get("auto_embed_col_name",        _ae["col_name"]),       1, 100,  _ae["col_name"])
+        _ae["col_rel"]           = _clampi(request.form.get("auto_embed_col_rel",         _ae["col_rel"]),        1, 100,  _ae["col_rel"])
+        _ae["col_photo"]         = _clampi(request.form.get("auto_embed_col_photo",       _ae["col_photo"]),      1, 100,  _ae["col_photo"])
+        _ae["col_status"]        = _clampi(request.form.get("auto_embed_col_status",      _ae["col_status"]),     1, 100,  _ae["col_status"])
+        _ae["whitelist_webhook"] = (request.form.get("auto_embed_whitelist_webhook") or "").strip()
+        _ae["embed_col"]         = _clampi(request.form.get("auto_embed_embed_col",       _ae["embed_col"]),      1, 100,  _ae["embed_col"])
         save_cfg(cfg)
 
-        # Acción: probar heartbeat (no bloquea)
-        if action=="heartbeat_test":
-            # encolado inmediato, el envío lo hace el thread dedicado
+        if action == "embed_run_now":
+            _ae_trigger.set()
+            hb_msg = "▶ Procesador de embeddings iniciado manualmente."
+        elif action=="heartbeat_test":
             try:
                 heartbeat_mgr.enqueue("manual_test")
                 hb_msg="Encolado (manual_test). Revisa el receptor / monitor."
@@ -2443,6 +2535,20 @@ def settings_index():
         except Exception:
             return "—"
 
+    _ae_d = DEFAULTS["auto_embed"]
+    _ae_c = cfg.get("auto_embed", {})
+    class _AE:
+        enabled          = _ae_c.get("enabled",          _ae_d["enabled"])
+        interval_min     = _ae_c.get("interval_min",     _ae_d["interval_min"])
+        requests_csv     = _ae_c.get("requests_csv",     _ae_d["requests_csv"])
+        col_code         = _ae_c.get("col_code",         _ae_d["col_code"])
+        col_name         = _ae_c.get("col_name",         _ae_d["col_name"])
+        col_rel          = _ae_c.get("col_rel",          _ae_d["col_rel"])
+        col_photo        = _ae_c.get("col_photo",        _ae_d["col_photo"])
+        col_status       = _ae_c.get("col_status",       _ae_d["col_status"])
+        whitelist_webhook= _ae_c.get("whitelist_webhook",_ae_d["whitelist_webhook"])
+        embed_col        = _ae_c.get("embed_col",        _ae_d["embed_col"])
+
     return render_template_string(
         SETTINGS_INDEX,
         api_token=cfg.get("api_token",""),
@@ -2454,6 +2560,9 @@ def settings_index():
         hb_last_try=_fmt_ts(hb_status.get("last_try_ts",0.0)),
         hb_last_code=(hb_status.get("last_code", None) if hb_status.get("last_code",None) is not None else "—"),
         hb_last_err=(hb_status.get("last_err","") or "—"),
+        ae=_AE(),
+        embed_status=_ae_state.get("status", "Inactivo"),
+        embed_msg=_ae_state.get("last_msg", "—"),
     )
 
 
@@ -3454,6 +3563,116 @@ def api_wifi_connect():
     code, out = sh(cmd)
     return jsonify({"ok":(code==0), "error":out if code!=0 else ""})
 
+# ----- Auto-Embed Processor -----
+_ae_state   = {"status": "Inactivo", "last_msg": "—"}
+_ae_trigger = threading.Event()
+
+def _gdrive_direct_url(url: str) -> str:
+    """Convierte URL de vista previa de Drive a URL de descarga directa."""
+    # Formato: https://drive.google.com/file/d/FILE_ID/view
+    m = re.search(r"/d/([a-zA-Z0-9_-]+)", url)
+    if m:
+        fid = m.group(1)
+        return f"https://drive.google.com/uc?export=download&id={fid}"
+    # Formato: https://drive.google.com/open?id=FILE_ID
+    m2 = re.search(r"[?&]id=([a-zA-Z0-9_-]+)", url)
+    if m2:
+        return f"https://drive.google.com/uc?export=download&id={m2.group(1)}"
+    return url  # ya es descargable
+
+def _auto_embed_loop():
+    """Hilo de segundo plano: busca solicitudes sin procesar y genera embeddings."""
+    import csv, io
+    while True:
+        ae = cfg.get("auto_embed", {})
+        interval = int(ae.get("interval_min", 10)) * 60
+        # Esperar el intervalo O hasta que se dispare manualmente
+        _ae_trigger.wait(timeout=interval)
+        _ae_trigger.clear()
+
+        ae = cfg.get("auto_embed", {})
+        if not ae.get("enabled") or not ae.get("requests_csv"):
+            _ae_state["status"] = "Inactivo (no configurado)"
+            continue
+
+        _ae_state["status"] = "Procesando..."
+        csv_url = ae["requests_csv"]
+        # Normalizar URL de Sheets a CSV export
+        csv_url = _sheets_to_csv(csv_url)
+        col_c   = int(ae.get("col_code",   1)) - 1
+        col_n   = int(ae.get("col_name",   2)) - 1
+        col_r   = int(ae.get("col_rel",    3)) - 1
+        col_p   = int(ae.get("col_photo",  4)) - 1
+        col_s   = int(ae.get("col_status", 5)) - 1
+        webhook = ae.get("whitelist_webhook", "")
+        embed_col = int(ae.get("embed_col", 14))
+
+        # Descargar hoja de solicitudes
+        try:
+            resp = requests.get(csv_url, timeout=20)
+            resp.raise_for_status()
+            rows = list(csv.reader(io.StringIO(resp.text)))
+        except Exception as e:
+            _ae_state["status"] = f"Error descargando CSV: {e}"
+            _ae_state["last_msg"] = str(e)
+            continue
+
+        pending = [r for r in rows if len(r) > col_s and
+                   r[col_s].strip().lower() in ("sin procesar", "sinprocesar", "pendiente", "")]
+        if not pending:
+            _ae_state["status"] = f"Sin pendientes ({datetime.datetime.now(TZ).strftime('%H:%M')})"
+            _ae_state["last_msg"] = "Todo procesado."
+            continue
+
+        ok_count = err_count = 0
+        for row in pending:
+            try:
+                code_val  = row[col_c].strip() if len(row) > col_c else ""
+                name_val  = row[col_n].strip() if len(row) > col_n else ""
+                photo_url = row[col_p].strip() if len(row) > col_p else ""
+                if not photo_url or not code_val:
+                    err_count += 1
+                    continue
+
+                # Descargar foto de Drive
+                dl_url = _gdrive_direct_url(photo_url)
+                img_resp = requests.get(dl_url, timeout=20)
+                img_resp.raise_for_status()
+                img_bytes = img_resp.content
+
+                # Generar embedding
+                nparr = np.frombuffer(img_bytes, np.uint8)
+                img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                if img is None:
+                    raise ValueError("imagen inválida")
+                faces = get_faces(img, resize_max_w=640)
+                if not faces:
+                    raise ValueError("no se detectó rostro")
+                feat_str = str(faces[0]["feature"].tolist()).replace(" ", "")
+
+                # Llamar al webhook de Apps Script para guardar
+                if webhook:
+                    payload = {
+                        "action": "set_embedding",
+                        "codigo": code_val,
+                        "nombre": name_val,
+                        "embedding": feat_str,
+                        "embed_col": embed_col
+                    }
+                    wh_resp = requests.post(webhook, json=payload, timeout=20)
+                    wh_resp.raise_for_status()
+
+                ok_count += 1
+                time.sleep(0.5)  # pequeña pausa para no saturar Drive/Sheets
+
+            except Exception as ex:
+                err_count += 1
+                _ae_state["last_msg"] = f"Error en {row[col_c] if len(row)>col_c else '?'}: {ex}"
+
+        ts = datetime.datetime.now(TZ).strftime("%H:%M")
+        _ae_state["status"] = f"Último ciclo {ts}: ✅ {ok_count} ok | ❌ {err_count} errores"
+        _ae_state["last_msg"] = f"Procesados {ok_count}/{len(pending)} solicitudes"
+
 # ----- Threads -----
 for i in (1,2):
     threading.Thread(target=_face_loop, args=(i,), daemon=True).start()
@@ -3461,6 +3680,7 @@ for i in (1,2):
 threading.Thread(target=_auto_refresh_loop, daemon=True).start()
 threading.Thread(target=_sysmon_loop, daemon=True).start()
 threading.Thread(target=_heartbeat_scheduler_loop, daemon=True).start()
+threading.Thread(target=_auto_embed_loop, daemon=True).start()
 
 if __name__=="__main__":
     os.environ["TZ"]="America/Mexico_City"
