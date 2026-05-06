@@ -22,11 +22,15 @@ sudo systemctl enable NetworkManager --now || true
 
 echo "==> 2) Clonar/actualizar repo"
 if [ -d "$APP_DIR/.git" ]; then
+  echo "Actualizando repositorio V3..."
   cd "$APP_DIR"
-  git pull --rebase
+  git fetch --all
+  git reset --hard origin/master
 else
+  echo "Clonando repositorio V3..."
   sudo rm -rf "$APP_DIR"
-  git clone https://github.com/comunito/comunito_portal_v2.git "$APP_DIR"
+  git clone https://github.com/comunito/FacialV3.git "$APP_DIR"
+  cd "$APP_DIR"
 fi
 
 echo "==> 3) Crear venv e instalar requirements"

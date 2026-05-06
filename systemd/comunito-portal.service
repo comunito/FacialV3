@@ -1,15 +1,16 @@
 [Unit]
-Description=Comunito Portal
+Description=Comunito Face Portal
 After=network.target
 StartLimitIntervalSec=0
 TimeoutStartSec=0
 
 [Service]
+Type=simple
 User=pi
 WorkingDirectory=/home/pi/comunito_portal
-ExecStart=/home/pi/comunito_portal/comunito-venv/bin/python portal_alpr_full.py
+ExecStart=/home/pi/comunito_portal/venv/bin/python portal_face_full.py
 Restart=always
-RestartSec=5
+RestartSec=3
 
 [Install]
 WantedBy=multi-user.target
