@@ -719,12 +719,14 @@ def compare_faces(feat1, feat2, threshold=0.36):
 
 
 # ========== Pre-procesado (solo ALPR) ==========
-def _preprocess_for_alpr(cam:int, frame_bgr):
+def _preprocess_for_face(cam:int, frame_bgr):
     """
-    Ligero y opcional.
-    - Se aplica SOLO al frame que entra al ALPR.
-    - NO afecta snapshots / stream.
-    - Ajustable por cámara: CLAHE clip + sharpen strength
+    Preprocesado optimizado para Reconocimiento Facial.
+    - Trabaja en espacio LAB para preservar el color (YuNet necesita color).
+    - Aplica CLAHE solo en el canal L (luminancia) sin alterar el hue/saturacion.
+    - Reduce ruido con filtro bilateral ligero (preserva bordes de la cara).
+    - Ajusta brillo auto (soft) en condicion nocturna.
+    - NO convierte a B&W (a diferencia del pipeline de placas).
     """
     try:
         c = cfg["cameras"][cam-1]
@@ -738,95 +740,56 @@ def _preprocess_for_alpr(cam:int, frame_bgr):
         if h < 20 or w < 20:
             return frame_bgr
 
-        if prof == "adaptive_auto":
-            # ── Fotómetro por software: decide automaticamente si hace falta boost ──
+        if prof in ("adaptive_auto", "darkfighter"):
             try:
-                g = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
-            except Exception:
-                g = frame_bgr if len(frame_bgr.shape)==2 else frame_bgr
+                # Medir luminancia media
+                gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
+                mean_lum = float(np.mean(gray))
 
-            mean_lum = float(np.mean(g))
+                # Convertir a LAB para operar solo en el canal L
+                lab = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2LAB)
+                l_ch, a_ch, b_ch = cv2.split(lab)
 
-            if mean_lum < 80:  # Condición nocturna / tormentosa
-                try:
-                    g = cv2.bilateralFilter(g, 9, 75, 75)
-                    table = np.array([((i / 255.0) ** (1.0 / 0.8)) * 255
-                                      for i in np.arange(0, 256)]).astype("uint8")
-                    g = cv2.LUT(g, table)
+                if mean_lum < 80:  # Nocturno / interior oscuro
+                    # Reduccion de ruido preservando bordes faciales
+                    l_ch = cv2.bilateralFilter(l_ch, 7, 40, 40)
+                    # CLAHE agresivo para rescatar detalle facial en oscuro
                     clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
-                    g = clahe.apply(g)
-                    blur = cv2.GaussianBlur(g, (0, 0), 2.0)
-                    g = cv2.addWeighted(g, 1.5, blur, -0.5, 0)
-                except Exception:
-                    pass
-            else:  # Condición diurna: sólo nitidez suave
-                try:
+                    l_ch = clahe.apply(l_ch)
+                    # Gamma boost suave (levanta sombras sin quemar luces)
+                    table = np.array([(i/255.0)**0.75 * 255 for i in range(256)], dtype=np.uint8)
+                    l_ch = cv2.LUT(l_ch, table)
+                else:  # Diurno / bien iluminado
+                    # CLAHE suave para normalizar variaciones de luz solar
                     clahe = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(8, 8))
-                    g = clahe.apply(g)
-                    blur = cv2.GaussianBlur(g, (0, 0), 1.0)
-                    g = cv2.addWeighted(g, 1.3, blur, -0.3, 0)
-                except Exception:
-                    pass
+                    l_ch = clahe.apply(l_ch)
 
-            try:
-                return cv2.cvtColor(g, cv2.COLOR_GRAY2BGR)
+                # Reconstruir BGR con color original intacto
+                merged = cv2.merge([l_ch, a_ch, b_ch])
+                return cv2.cvtColor(merged, cv2.COLOR_LAB2BGR)
             except Exception:
                 return frame_bgr
 
-        if prof == "darkfighter":
+        if prof == "face_denoise":
+            # Perfil suave: solo denoising bilateral, ideal para camaras de buena calidad
             try:
-                g = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
-            except Exception:
-                g = frame_bgr
-            try:
-                g = cv2.bilateralFilter(g, 9, 75, 75)
-                table = np.array([((i / 255.0) ** (1.0/0.8)) * 255 for i in np.arange(0, 256)]).astype("uint8")
-                g = cv2.LUT(g, table)
-                clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
-                g = clahe.apply(g)
-                blur = cv2.GaussianBlur(g, (0,0), 2.0)
-                g = cv2.addWeighted(g, 1.5, blur, -0.5, 0)
-                return cv2.cvtColor(g, cv2.COLOR_GRAY2BGR)
-            except Exception:
-                pass
-
-        if prof == "bw_hicontrast_sharp":
-            clip = _clampf(c.get("pp_clahe_clip", 2.0), 1.0, 4.0, 2.0)
-            sharp = _clampf(c.get("pp_sharp_strength", 0.55), 0.0, 1.2, 0.55)
-
-            # 1) a gris
-            try:
-                g = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
-            except Exception:
-                g = frame_bgr
-
-            # 2) CLAHE (contraste local)
-            try:
-                clahe = cv2.createCLAHE(clipLimit=float(clip), tileGridSize=(8,8))
-                g = clahe.apply(g)
-            except Exception:
-                pass
-
-            # 3) Unsharp mask (nitidez) - controlado por sharp
-            # w1 = 1 + sharp ; w2 = -sharp
-            try:
-                if float(sharp) > 0.001:
-                    blur = cv2.GaussianBlur(g, (0,0), 1.0)
-                    w1 = 1.0 + float(sharp)
-                    w2 = -float(sharp)
-                    g = cv2.addWeighted(g, w1, blur, w2, 0)
-            except Exception:
-                pass
-
-            # 4) volver a BGR (fast-alpr espera BGR)
-            try:
-                return cv2.cvtColor(g, cv2.COLOR_GRAY2BGR)
+                clip = _clampf(c.get("pp_clahe_clip", 1.5), 0.5, 4.0, 1.5)
+                lab = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2LAB)
+                l_ch, a_ch, b_ch = cv2.split(lab)
+                l_ch = cv2.bilateralFilter(l_ch, 5, 30, 30)
+                clahe = cv2.createCLAHE(clipLimit=float(clip), tileGridSize=(8, 8))
+                l_ch = clahe.apply(l_ch)
+                merged = cv2.merge([l_ch, a_ch, b_ch])
+                return cv2.cvtColor(merged, cv2.COLOR_LAB2BGR)
             except Exception:
                 return frame_bgr
 
         return frame_bgr
     except Exception:
         return frame_bgr
+
+# Alias para compatibilidad con referencias que aun usen el nombre anterior
+_preprocess_for_alpr = _preprocess_for_face
 
 # ========== Whitelists ==========
 wl_index=[{"owners":{}, "visitors":{}}, {"owners":{}, "visitors":{}}]
@@ -2853,21 +2816,21 @@ def snapshot_alpr():
     except Exception:
         fr_roi = fr
 
-    # Preprocesado defensivo
-    fr_alpr = fr_roi
+    # Preprocesado facial (preserva color)
+    fr_face = fr_roi
     try:
-        fn = globals().get("_preprocess_for_alpr")
+        fn = globals().get("_preprocess_for_face")
         if callable(fn):
-            fr_alpr = fn(cam, fr_roi)
+            fr_face = fn(cam, fr_roi)
     except Exception:
-        fr_alpr = fr_roi
+        fr_face = fr_roi
 
     # Resize opcional
     try:
         w = int(request.args.get("w", "0"))
     except Exception:
         w = 0
-    fr2 = fr_alpr
+    fr2 = fr_face
     if w and w > 32:
         h, wi = fr2.shape[:2]
         tw = min(w, wi)
@@ -3083,7 +3046,7 @@ def api_tag_event():
 
 @app.route("/api/faces/enroll", methods=["POST"])
 def api_faces_enroll():
-    # Permitir subir imagen por multipart/form-data o base64
+    """Webhook unitario: recibe UNA foto (multipart o base64) y devuelve su embedding."""
     img_bytes = None
     if "file" in request.files:
         img_bytes = request.files["file"].read()
@@ -3092,32 +3055,153 @@ def api_faces_enroll():
         if b64:
             import base64
             img_bytes = base64.b64decode(b64)
-            
+
     if not img_bytes:
         return jsonify({"ok": False, "error": "No image provided. Send 'file' (multipart) or 'image_base64' (json)"}), 400
-        
+
     try:
-        import numpy as np
         nparr = np.frombuffer(img_bytes, np.uint8)
         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         if img is None:
             return jsonify({"ok": False, "error": "Invalid image format"}), 400
-            
+
         faces = get_faces(img, resize_max_w=640)
         if not faces:
             return jsonify({"ok": False, "error": "No face detected in the image"}), 400
-            
+
         best_face = faces[0]
         feat = best_face["feature"].tolist()
         feat_str = str(feat).replace(" ", "")
-        
+
         return jsonify({
-            "ok": True, 
+            "ok": True,
             "embedding": feat_str,
             "score": best_face["score"]
         })
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# ── Batch Embedding Processor (para altas masivas de 5,000+ usuarios) ──
+import uuid as _uuid
+_batch_jobs = {}   # { job_id: { total, done, errors, results, running } }
+_batch_q   = queue.Queue(maxsize=20000)
+
+def _batch_worker():
+    """Thread de fondo: procesa la cola de embeddings uno a uno sin saturar la Pi."""
+    while True:
+        try:
+            job_id, item = _batch_q.get(timeout=1.0)
+        except queue.Empty:
+            continue
+        try:
+            job = _batch_jobs.get(job_id)
+            if not job:
+                continue
+
+            # Descargar imagen desde URL
+            url = item.get("image_url", "")
+            user_id = item.get("id", "")
+            try:
+                r = requests.get(url, timeout=15)
+                r.raise_for_status()
+                img_bytes = r.content
+            except Exception as e:
+                job["errors"].append({"id": user_id, "error": f"download: {e}"})
+                job["done"] += 1
+                continue
+
+            # Decodificar y extraer embedding
+            try:
+                nparr = np.frombuffer(img_bytes, np.uint8)
+                img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                if img is None:
+                    raise ValueError("invalid image bytes")
+                faces = get_faces(img, resize_max_w=640)
+                if not faces:
+                    raise ValueError("no face detected")
+                feat = faces[0]["feature"].tolist()
+                feat_str = str(feat).replace(" ", "")
+                job["results"].append({"id": user_id, "embedding": feat_str, "score": faces[0]["score"]})
+            except Exception as e:
+                job["errors"].append({"id": user_id, "error": str(e)})
+
+            job["done"] += 1
+            if job["done"] >= job["total"]:
+                job["running"] = False
+        except Exception:
+            pass
+        finally:
+            try: _batch_q.task_done()
+            except: pass
+
+threading.Thread(target=_batch_worker, daemon=True).start()
+
+
+@app.route("/api/faces/batch_enroll", methods=["POST"])
+def api_faces_batch_enroll():
+    """
+    Webhook masivo para dar de alta hasta 5,000 usuarios.
+    Body JSON:
+    {
+      "users": [
+        {"id": "U001", "image_url": "https://..."},
+        {"id": "U002", "image_url": "https://..."}
+      ]
+    }
+    Devuelve un job_id para consultar el progreso con /api/faces/batch_status/<job_id>
+    """
+    if not request.is_json:
+        return jsonify({"ok": False, "error": "Content-Type must be application/json"}), 400
+
+    users = (request.json or {}).get("users", [])
+    if not users or not isinstance(users, list):
+        return jsonify({"ok": False, "error": "'users' array is required"}), 400
+    if len(users) > 10000:
+        return jsonify({"ok": False, "error": "Max 10,000 users per batch"}), 400
+
+    job_id = str(_uuid.uuid4())
+    _batch_jobs[job_id] = {
+        "total": len(users),
+        "done": 0,
+        "errors": [],
+        "results": [],
+        "running": True
+    }
+
+    for item in users:
+        try:
+            _batch_q.put_nowait((job_id, item))
+        except queue.Full:
+            return jsonify({"ok": False, "error": "Batch queue full, try smaller batches"}), 503
+
+    return jsonify({
+        "ok": True,
+        "job_id": job_id,
+        "total": len(users),
+        "status_url": f"/api/faces/batch_status/{job_id}"
+    })
+
+
+@app.route("/api/faces/batch_status/<job_id>")
+def api_faces_batch_status(job_id):
+    """Consulta el progreso de un job de batch.
+    Cuando 'running' sea false, 'results' tiene todos los embeddings listos para copiar al Sheet."""
+    job = _batch_jobs.get(job_id)
+    if not job:
+        return jsonify({"ok": False, "error": "job_id not found"}), 404
+
+    pct = round(job["done"] / max(job["total"], 1) * 100, 1)
+    return jsonify({
+        "ok": True,
+        "job_id": job_id,
+        "running": job["running"],
+        "total": job["total"],
+        "done": job["done"],
+        "pct": pct,
+        "errors": job["errors"],
+        "results": job["results"] if not job["running"] else []
+    })
 
 @app.route("/api/debug")
 def api_alpr_debug():
