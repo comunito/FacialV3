@@ -38,3 +38,20 @@ def test_whitelist_csv_is_cached_without_real_identity_data(tmp_path):
     assert store.refresh(str(source)) == 1
     assert store.identities[0].person_id == "unit"
     assert store.load_cache() == 1
+
+
+def test_authorization_requires_stable_hits_and_obeys_cooldown(tmp_path, monkeypatch):
+    settings = Settings(data_dir=str(tmp_path))
+    settings.camera.process_every_n = 1
+    settings.recognition.stable_hits = 2
+    settings.recognition.cooldown_seconds = 60
+    service = RecognitionService(settings)
+    service.store.identities = []
+    identity_feature = parse_embedding("1,0")
+    from facial_portal.embeddings import Identity
+    service.store.identities = [Identity("unit", "Unit Test", identity_feature)]
+    service.engine.embed = lambda frame: [identity_feature]
+    service.engine.similarity = lambda left, right: 0.9
+    assert service.process_frame(object())["status"] == "pending"
+    assert service.process_frame(object())["status"] == "authorized"
+    assert service.process_frame(object())["status"] == "cooldown"

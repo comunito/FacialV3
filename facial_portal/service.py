@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 import threading
+from collections import defaultdict
 from datetime import datetime, timezone
 
 import cv2
@@ -26,6 +27,8 @@ class RecognitionService:
         self.last_event = None
         self.last_error = ""
         self._worker = None
+        self._candidate_hits = defaultdict(int)
+        self._last_authorized_at = 0.0
         self.store.load_cache()
 
     def refresh_whitelist(self) -> int:
@@ -45,6 +48,13 @@ class RecognitionService:
         if identity is None or score < threshold:
             self.audit.record("face_denied", score=score)
             return {"status": "denied", "score": score}
+        self._candidate_hits[identity.person_id] += 1
+        if self._candidate_hits[identity.person_id] < max(1, self.settings.recognition.stable_hits):
+            return {"status": "pending", "person_id": identity.person_id, "score": score}
+        now = time.monotonic()
+        if now - self._last_authorized_at < max(0.0, self.settings.recognition.cooldown_seconds):
+            return {"status": "cooldown", "person_id": identity.person_id, "score": score}
+        self._last_authorized_at = now
         self.audit.record("face_authorized", identity.person_id, identity.name, score)
         self.last_event = datetime.now(timezone.utc).isoformat()
         opened, gate_detail = self.gate.pulse(identity.person_id)

@@ -33,3 +33,5 @@ No se incluyen claves, contraseñas, fotos ni embeddings reales. `data/whitelist
 ## Formato de whitelist
 
 CSV con columnas `person_id,name,embedding,active`. Los embeddings se generan en el laboratorio de `core` y se sincronizan después mediante una fuente autenticada o un mecanismo seguro acordado. Los embeddings reales no deben subirse a GitHub.
+
+El contrato de esa integración está documentado en [`docs/core-embeddings-contract.md`](docs/core-embeddings-contract.md); la implementación dentro de `core` queda como fase separada.
