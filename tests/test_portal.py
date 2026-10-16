@@ -86,3 +86,4 @@ def test_superadmin_enrollment_from_selfie(tmp_path):
     response = client.post("/api/enroll", data={"person_id": "unit", "name": "Unit Test", "selfie": (BytesIO(selfie), "selfie.jpg")}, headers={"X-API-Key": "test-token"}, content_type="multipart/form-data")
     assert response.status_code == 200
     assert response.json["model_id"] == settings.recognition.model_id
+    assert response.json["sheet_sync"] == "local_only"

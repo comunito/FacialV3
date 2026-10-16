@@ -50,7 +50,8 @@ class RecognitionService:
         webhook_error = ""
         if self.settings.embedding_webhook_url:
             try:
-                response = requests.post(self.settings.embedding_webhook_url, json={"person_id": person_id, "name": name, "embedding": features[0].tolist(), "model_id": self.settings.recognition.model_id}, timeout=10)
+                headers = {"Authorization": f"Bearer {self.settings.embedding_webhook_token}"} if self.settings.embedding_webhook_token else {}
+                response = requests.post(self.settings.embedding_webhook_url, json={"person_id": person_id, "name": name, "embedding": features[0].tolist(), "model_id": self.settings.recognition.model_id}, headers=headers, timeout=10)
                 response.raise_for_status()
             except requests.RequestException as exc:
                 webhook_error = exc.__class__.__name__

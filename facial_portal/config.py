@@ -46,6 +46,7 @@ class Settings:
     gate: GateConfig = field(default_factory=GateConfig)
     whitelist_source: str = ""
     embedding_webhook_url: str = ""
+    embedding_webhook_token: str = ""
     selfie_drive_folder_url: str = ""
     webhook_urls: list[str] = field(default_factory=list)
 
@@ -62,6 +63,7 @@ class Settings:
         settings = cls(camera=camera, recognition=recognition, gate=gate, **values)
         settings.camera.rtsp_url = os.environ.get("FACIAL_RTSP_URL", settings.camera.rtsp_url)
         settings.api_token = os.environ.get("FACIAL_API_TOKEN", settings.api_token)
+        settings.embedding_webhook_token = os.environ.get("FACIAL_EMBEDDING_WEBHOOK_TOKEN", settings.embedding_webhook_token)
         return settings
 
     def save(self, path: str | Path = "config.json") -> None:
