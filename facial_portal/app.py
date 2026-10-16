@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, render_template
 
 from .config import Settings
 from .service import RecognitionService
@@ -15,6 +15,10 @@ def create_app(settings: Settings | None = None, service: RecognitionService | N
     service = service or RecognitionService(settings)
     app = Flask(__name__)
     app.config["facial_service"] = service
+
+    @app.get("/admin")
+    def admin():
+        return render_template("admin.html", model_id=settings.recognition.model_id, drive_folder_url=settings.selfie_drive_folder_url)
 
     @app.get("/healthz")
     def healthz():
@@ -33,6 +37,23 @@ def create_app(settings: Settings | None = None, service: RecognitionService | N
         if not _authorized(settings, request):
             return jsonify({"error": "unauthorized"}), 401
         return jsonify({"identities": service.refresh_whitelist()})
+
+    @app.post("/api/enroll")
+    def enroll():
+        if not _authorized(settings, request):
+            return jsonify({"error": "unauthorized"}), 401
+        upload = request.files.get("selfie")
+        if upload is None or not upload.filename:
+            return jsonify({"error": "selfie is required"}), 400
+        import cv2
+        import numpy as np
+        frame = cv2.imdecode(np.frombuffer(upload.read(), dtype=np.uint8), cv2.IMREAD_COLOR)
+        if frame is None:
+            return jsonify({"error": "invalid image"}), 400
+        try:
+            return jsonify(service.enroll(frame, request.form.get("person_id", ""), request.form.get("name", "")))
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
 
     @app.post("/api/gate/pulse")
     def pulse():

@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="es">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Alta facial — Comunito</title>
+<style>
+body{font-family:system-ui,sans-serif;max-width:560px;margin:2rem auto;padding:0 1rem;color:#172033}form{display:grid;gap:.8rem}label{font-weight:600}input,button{font:inherit;padding:.75rem;border:1px solid #cbd5e1;border-radius:.5rem}button{background:#166534;color:white;border:0;font-weight:700}small{color:#64748b}.ok{color:#166534}.error{color:#b91c1c}
+</style>
+<h1>Alta de reconocimiento facial</h1>
+<p>Captura una selfie con el celular. La imagen se procesa localmente y no se conserva por defecto.</p>
+<form id="enrollForm">
+  <label>Código de persona <input name="person_id" required autocomplete="off"></label>
+  <label>Nombre <input name="name" required autocomplete="name"></label>
+  <label>Selfie <input name="selfie" type="file" accept="image/*" capture="user" required></label>
+  <small>Modelo activo: {{ model_id }}{% if drive_folder_url %}. Carpeta Drive configurada.{% endif %}</small>
+  <button>Generar y registrar embedding</button>
+</form>
+<p id="result"></p>
+<script>
+const form=document.getElementById('enrollForm');
+form.onsubmit=async(event)=>{event.preventDefault();const result=document.getElementById('result');result.textContent='Procesando…';try{const key=prompt('API key del portal');if(!key){result.textContent='Operación cancelada';return}const res=await fetch('/api/enroll',{method:'POST',headers:{'X-API-Key':key},body:new FormData(form)});const data=await res.json();if(!res.ok)throw new Error(data.error||'No se pudo registrar');result.className='ok';result.textContent=`Registro creado para ${data.name}. Modelo: ${data.model_id}.`;form.reset()}catch(error){result.className='error';result.textContent=error.message}};
+</script>

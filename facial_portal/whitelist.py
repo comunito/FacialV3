@@ -40,13 +40,23 @@ class WhitelistStore:
             if not row.get("embedding") or row.get("active", "true").lower() in {"0", "false", "no", "inactivo"}:
                 continue
             identities.append({"person_id": row.get("person_id") or row.get("id") or row.get("codigo") or "", "name": row.get("name") or row.get("nombre") or "", "embedding": parse_embedding(row["embedding"]).tolist(), "active": True})
+        self._write_document(identities)
+        return self.load_cache()
+
+    def upsert(self, person_id: str, name: str, embedding, active: bool = True) -> int:
+        self.load_cache()
+        rows = [{"person_id": identity.person_id, "name": identity.name, "embedding": identity.embedding.tolist(), "active": identity.active} for identity in self.identities if identity.person_id != person_id]
+        rows.append({"person_id": person_id, "name": name, "embedding": parse_embedding(embedding).tolist(), "active": active})
+        self._write_document(rows)
+        return self.load_cache()
+
+    def _write_document(self, identities: list[dict]) -> None:
         self.cache_path.parent.mkdir(parents=True, exist_ok=True)
         document = {"schema_version": 1, "model_id": self.model_id, "identities": identities}
         with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=self.cache_path.parent, delete=False) as tmp:
             json.dump(document, tmp, ensure_ascii=False)
             tmp_path = Path(tmp.name)
         tmp_path.replace(self.cache_path)
-        return self.load_cache()
 
     def match(self, feature, similarity) -> tuple[Identity | None, float]:
         best, score = None, -1.0

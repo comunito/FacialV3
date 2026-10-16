@@ -36,6 +36,18 @@ class RecognitionService:
         self.audit.record("whitelist_refreshed", detail=f"identities={count}")
         return count
 
+    def enroll(self, frame, person_id: str, name: str) -> dict:
+        person_id = person_id.strip()
+        name = name.strip()
+        if not person_id or not name:
+            raise ValueError("person_id and name are required")
+        features = self.engine.embed(self._resize_for_inference(frame))
+        if len(features) != 1:
+            raise ValueError("the selfie must contain exactly one face")
+        count = self.store.upsert(person_id, name, features[0])
+        self.audit.record("face_enrolled", person_id=person_id, name=name, detail=f"model={self.settings.recognition.model_id}")
+        return {"person_id": person_id, "name": name, "model_id": self.settings.recognition.model_id, "identities": count}
+
     def process_frame(self, frame) -> dict:
         self.frame_count += 1
         if self.frame_count % max(1, self.settings.camera.process_every_n):

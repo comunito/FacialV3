@@ -72,3 +72,17 @@ def test_authorization_requires_stable_hits_and_obeys_cooldown(tmp_path, monkeyp
     assert service.process_frame(frame)["status"] == "pending"
     assert service.process_frame(frame)["status"] == "authorized"
     assert service.process_frame(frame)["status"] == "cooldown"
+
+
+def test_superadmin_enrollment_from_selfie(tmp_path):
+    settings = Settings(data_dir=str(tmp_path), api_token="test-token")
+    service = RecognitionService(settings)
+    feature = parse_embedding("1,0")
+    service.engine.embed = lambda frame: [feature]
+    client = create_app(settings, service).test_client()
+    import cv2
+    from io import BytesIO
+    selfie = cv2.imencode(".jpg", np.zeros((100, 100, 3), dtype=np.uint8))[1].tobytes()
+    response = client.post("/api/enroll", data={"person_id": "unit", "name": "Unit Test", "selfie": (BytesIO(selfie), "selfie.jpg")}, headers={"X-API-Key": "test-token"}, content_type="multipart/form-data")
+    assert response.status_code == 200
+    assert response.json["model_id"] == settings.recognition.model_id

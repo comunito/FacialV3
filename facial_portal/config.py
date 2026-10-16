@@ -45,6 +45,8 @@ class Settings:
     recognition: RecognitionConfig = field(default_factory=RecognitionConfig)
     gate: GateConfig = field(default_factory=GateConfig)
     whitelist_source: str = ""
+    embedding_webhook_url: str = ""
+    selfie_drive_folder_url: str = ""
     webhook_urls: list[str] = field(default_factory=list)
 
     @classmethod

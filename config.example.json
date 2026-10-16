@@ -26,5 +26,7 @@
     "allow_physical": false
   },
   "whitelist_source": "data/whitelist.csv",
+  "embedding_webhook_url": "",
+  "selfie_drive_folder_url": "",
   "webhook_urls": []
 }
