@@ -38,6 +38,13 @@ class FaceEngine:
         self.recognizer_path = Path(recognizer_path)
         self._detector = None
         self._recognizer = None
+        self.feature_dim = None
+
+    @property
+    def embedding_dim(self) -> int | None:
+        if self._recognizer is None:
+            return None
+        return int(self.feature_dim)
 
     def _load(self) -> None:
         if self._detector is not None:
@@ -58,6 +65,7 @@ class FaceEngine:
         for face in faces:
             aligned = self._recognizer.alignCrop(frame, face)
             feature = self._recognizer.feature(aligned).reshape(-1).astype(np.float32)
+            self.feature_dim = feature.size
             result.append(parse_embedding(feature.tolist()))
         return result
 

@@ -16,6 +16,7 @@ class CameraConfig:
 
 @dataclass
 class RecognitionConfig:
+    model_id: str = "sface-2021dec-fp32-v1"
     threshold: float = 0.363
     stable_hits: int = 2
     cooldown_seconds: float = 8.0
@@ -58,6 +59,7 @@ class Settings:
         values = {k: v for k, v in raw.items() if k not in {"camera", "recognition", "gate"}}
         settings = cls(camera=camera, recognition=recognition, gate=gate, **values)
         settings.camera.rtsp_url = os.environ.get("FACIAL_RTSP_URL", settings.camera.rtsp_url)
+        settings.api_token = os.environ.get("FACIAL_API_TOKEN", settings.api_token)
         return settings
 
     def save(self, path: str | Path = "config.json") -> None:

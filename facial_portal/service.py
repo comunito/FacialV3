@@ -20,7 +20,7 @@ class RecognitionService:
         self.settings = settings
         data = settings.data_dir
         self.audit = AuditLog(f"{data}/audit.sqlite3")
-        self.store = WhitelistStore(f"{data}/whitelist.json")
+        self.store = WhitelistStore(f"{data}/whitelist.json", settings.recognition.model_id)
         self.engine = FaceEngine(settings.recognition.detector_model, settings.recognition.recognizer_model)
         self.gate = Gate(settings.gate)
         self.frame_count = 0
@@ -40,6 +40,7 @@ class RecognitionService:
         self.frame_count += 1
         if self.frame_count % max(1, self.settings.camera.process_every_n):
             return {"status": "skipped"}
+        frame = self._resize_for_inference(frame)
         features = self.engine.embed(frame)
         if not features:
             return {"status": "no_face"}
@@ -60,6 +61,14 @@ class RecognitionService:
         opened, gate_detail = self.gate.pulse(identity.person_id)
         errors = send(self.settings.webhook_urls, {"event": "face_authorized", "person_id": identity.person_id, "name": identity.name, "score": score, "gate_opened": opened})
         return {"status": "authorized", "person_id": identity.person_id, "name": identity.name, "score": score, "gate": gate_detail, "webhook_errors": errors}
+
+    def _resize_for_inference(self, frame):
+        width = max(0, int(self.settings.camera.resize_width))
+        if not width or frame.shape[1] <= width:
+            return frame
+        ratio = width / frame.shape[1]
+        height = max(1, int(frame.shape[0] * ratio))
+        return cv2.resize(frame, (width, height), interpolation=cv2.INTER_AREA)
 
     def run(self) -> None:
         url = self.settings.camera.rtsp_url

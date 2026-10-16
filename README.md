@@ -12,6 +12,7 @@ La rama `dev/facial-portal-rebuild` contiene el portal nuevo. El archivo histór
 - `facial_portal/gate.py`: integración HTTP con ESP32; permanece en dry-run por defecto.
 - `facial_portal/service.py`: captura RTSP, reconocimiento y coordinación de eventos.
 - `facial_portal/app.py`: health, estado, bitácora y refresh de whitelist.
+- `models/README.md`: política de perfiles, compatibilidad y versionado de modelos.
 
 ## Arranque local
 
@@ -25,6 +26,8 @@ python main.py
 ```
 
 No se incluyen claves, contraseñas, fotos ni embeddings reales. `data/whitelist.csv` y `config.json` están ignorados por Git.
+
+Configura `api_token` con un valor aleatorio largo o usa `FACIAL_API_TOKEN`; las operaciones de refresh y gate requieren `X-API-Key`.
 
 ## Seguridad del gate
 

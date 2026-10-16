@@ -6,6 +6,10 @@ from .config import Settings
 from .service import RecognitionService
 
 
+def _authorized(settings: Settings, request) -> bool:
+    return bool(settings.api_token) and request.headers.get("X-API-Key", "") == settings.api_token
+
+
 def create_app(settings: Settings | None = None, service: RecognitionService | None = None) -> Flask:
     settings = settings or Settings.load()
     service = service or RecognitionService(settings)
@@ -26,10 +30,14 @@ def create_app(settings: Settings | None = None, service: RecognitionService | N
 
     @app.post("/api/whitelist/refresh")
     def refresh():
+        if not _authorized(settings, request):
+            return jsonify({"error": "unauthorized"}), 401
         return jsonify({"identities": service.refresh_whitelist()})
 
     @app.post("/api/gate/pulse")
     def pulse():
+        if not _authorized(settings, request):
+            return jsonify({"error": "unauthorized"}), 401
         opened, detail = service.gate.pulse("manual_api")
         service.audit.record("gate_pulse_requested", detail=detail)
         return jsonify({"opened": opened, "detail": detail}), (200 if opened else 409)
