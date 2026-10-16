@@ -1,17 +1,17 @@
 [Unit]
-Description=Comunito Face Portal
-After=network.target
+Description=Comunito autonomous facial access portal
+After=network-online.target
+Wants=network-online.target
 StartLimitIntervalSec=0
-TimeoutStartSec=0
 
 [Service]
 Type=simple
 User=USER_PLACEHOLDER
 WorkingDirectory=/home/USER_PLACEHOLDER/comunito_facial
-ExecStart=/home/USER_PLACEHOLDER/comunito_facial/comunito-venv/bin/python portal_face_full.py
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/USER_PLACEHOLDER/comunito_facial/comunito-venv/bin/python main.py
 Restart=always
 RestartSec=5
-Environment=PYTHONUNBUFFERED=1
 
 [Install]
 WantedBy=multi-user.target

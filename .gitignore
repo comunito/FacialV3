@@ -1,7 +1,12 @@
 comunito-venv/
+.venv/
 __pycache__/
 *.pyc
 *.log
+config.json
 config_full.json
+data/*
+!data/whitelist.csv.example
+*.sqlite3
 *.bak*
 .DS_Store
