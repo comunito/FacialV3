@@ -1,0 +1,40 @@
+import json
+
+from facial_portal.app import create_app
+from facial_portal.config import GateConfig, Settings
+from facial_portal.embeddings import parse_embedding
+from facial_portal.service import RecognitionService
+from facial_portal.whitelist import WhitelistStore
+
+
+def test_parse_embedding_normalizes():
+    vector = parse_embedding("1,0")
+    assert vector.tolist() == [1.0, 0.0]
+
+
+def test_health_and_gate_are_safe_by_default(tmp_path):
+    settings = Settings(data_dir=str(tmp_path), gate=GateConfig())
+    service = RecognitionService(settings)
+    client = create_app(settings, service).test_client()
+    assert client.get("/healthz").status_code == 200
+    response = client.post("/api/gate/pulse")
+    assert response.status_code == 409
+    assert response.json["opened"] is False
+
+
+def test_config_round_trip(tmp_path):
+    settings = Settings(data_dir=str(tmp_path))
+    path = tmp_path / "config.json"
+    settings.save(path)
+    loaded = Settings.load(path)
+    assert json.loads(path.read_text())["gate"]["allow_physical"] is False
+    assert loaded.data_dir == str(tmp_path)
+
+
+def test_whitelist_csv_is_cached_without_real_identity_data(tmp_path):
+    source = tmp_path / "source.csv"
+    source.write_text("person_id,name,embedding,active\nunit,Unit Test,1;0,true\n", encoding="utf-8")
+    store = WhitelistStore(tmp_path / "cache.json")
+    assert store.refresh(str(source)) == 1
+    assert store.identities[0].person_id == "unit"
+    assert store.load_cache() == 1

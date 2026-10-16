@@ -1,0 +1,84 @@
+from __future__ import annotations
+
+import time
+import threading
+from datetime import datetime, timezone
+
+import cv2
+
+from .audit import AuditLog
+from .config import Settings
+from .embeddings import FaceEngine
+from .gate import Gate
+from .webhooks import send
+from .whitelist import WhitelistStore
+
+
+class RecognitionService:
+    def __init__(self, settings: Settings):
+        self.settings = settings
+        data = settings.data_dir
+        self.audit = AuditLog(f"{data}/audit.sqlite3")
+        self.store = WhitelistStore(f"{data}/whitelist.json")
+        self.engine = FaceEngine(settings.recognition.detector_model, settings.recognition.recognizer_model)
+        self.gate = Gate(settings.gate)
+        self.frame_count = 0
+        self.last_event = None
+        self.last_error = ""
+        self._worker = None
+        self.store.load_cache()
+
+    def refresh_whitelist(self) -> int:
+        count = self.store.refresh(self.settings.whitelist_source)
+        self.audit.record("whitelist_refreshed", detail=f"identities={count}")
+        return count
+
+    def process_frame(self, frame) -> dict:
+        self.frame_count += 1
+        if self.frame_count % max(1, self.settings.camera.process_every_n):
+            return {"status": "skipped"}
+        features = self.engine.embed(frame)
+        if not features:
+            return {"status": "no_face"}
+        identity, score = self.store.match(features[0], self.engine.similarity)
+        threshold = self.settings.recognition.threshold
+        if identity is None or score < threshold:
+            self.audit.record("face_denied", score=score)
+            return {"status": "denied", "score": score}
+        self.audit.record("face_authorized", identity.person_id, identity.name, score)
+        self.last_event = datetime.now(timezone.utc).isoformat()
+        opened, gate_detail = self.gate.pulse(identity.person_id)
+        errors = send(self.settings.webhook_urls, {"event": "face_authorized", "person_id": identity.person_id, "name": identity.name, "score": score, "gate_opened": opened})
+        return {"status": "authorized", "person_id": identity.person_id, "name": identity.name, "score": score, "gate": gate_detail, "webhook_errors": errors}
+
+    def run(self) -> None:
+        url = self.settings.camera.rtsp_url
+        if not url:
+            raise RuntimeError("camera.rtsp_url is empty")
+        capture = cv2.VideoCapture(url, cv2.CAP_FFMPEG)
+        if not capture.isOpened():
+            raise RuntimeError("could not open RTSP camera")
+        try:
+            while True:
+                ok, frame = capture.read()
+                if not ok:
+                    time.sleep(1)
+                    capture.release()
+                    capture = cv2.VideoCapture(url, cv2.CAP_FFMPEG)
+                    continue
+                self.process_frame(frame)
+        finally:
+            capture.release()
+
+    def start_background(self) -> None:
+        if self._worker and self._worker.is_alive():
+            return
+        self._worker = threading.Thread(target=self._run_guarded, name="facial-camera", daemon=True)
+        self._worker.start()
+
+    def _run_guarded(self) -> None:
+        try:
+            self.run()
+        except Exception as exc:
+            self.last_error = str(exc)
+            self.audit.record("camera_error", detail=exc.__class__.__name__)

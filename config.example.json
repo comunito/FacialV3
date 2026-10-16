@@ -1,0 +1,28 @@
+{
+  "host": "0.0.0.0",
+  "port": 5001,
+  "data_dir": "data",
+  "camera": {
+    "name": "tapo-c320ws",
+    "rtsp_url": "rtsp://usuario:CONTRASENA@192.168.1.50:554/stream1",
+    "process_every_n": 2,
+    "resize_width": 960
+  },
+  "recognition": {
+    "threshold": 0.363,
+    "stable_hits": 2,
+    "cooldown_seconds": 8,
+    "detector_model": "models/face_detection_yunet.onnx",
+    "recognizer_model": "models/face_recognition_sface.onnx"
+  },
+  "gate": {
+    "enabled": false,
+    "mode": "http",
+    "url": "http://192.168.1.60",
+    "token": "",
+    "pulse_ms": 500,
+    "allow_physical": false
+  },
+  "whitelist_source": "data/whitelist.csv",
+  "webhook_urls": []
+}
