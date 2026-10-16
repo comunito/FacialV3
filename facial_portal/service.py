@@ -6,6 +6,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 
 import cv2
+import requests
 
 from .audit import AuditLog
 from .config import Settings
@@ -46,7 +47,15 @@ class RecognitionService:
             raise ValueError("the selfie must contain exactly one face")
         count = self.store.upsert(person_id, name, features[0])
         self.audit.record("face_enrolled", person_id=person_id, name=name, detail=f"model={self.settings.recognition.model_id}")
-        return {"person_id": person_id, "name": name, "model_id": self.settings.recognition.model_id, "identities": count}
+        webhook_error = ""
+        if self.settings.embedding_webhook_url:
+            try:
+                response = requests.post(self.settings.embedding_webhook_url, json={"person_id": person_id, "name": name, "embedding": features[0].tolist(), "model_id": self.settings.recognition.model_id}, timeout=10)
+                response.raise_for_status()
+            except requests.RequestException as exc:
+                webhook_error = exc.__class__.__name__
+                self.audit.record("face_enrollment_sync_error", person_id=person_id, name=name, detail=webhook_error)
+        return {"person_id": person_id, "name": name, "model_id": self.settings.recognition.model_id, "identities": count, "sheet_sync": "sent" if self.settings.embedding_webhook_url and not webhook_error else ("error" if webhook_error else "local_only"), "sheet_sync_error": webhook_error}
 
     def process_frame(self, frame) -> dict:
         self.frame_count += 1

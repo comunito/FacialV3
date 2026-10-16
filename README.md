@@ -29,6 +29,8 @@ No se incluyen claves, contraseñas, fotos ni embeddings reales. `data/whitelist
 
 Configura `api_token` con un valor aleatorio largo o usa `FACIAL_API_TOKEN`; las operaciones de refresh y gate requieren `X-API-Key`.
 
+El alta desde `/admin` procesa la selfie en memoria y registra el embedding local. Si se configura `embedding_webhook_url`, también envía únicamente `person_id`, nombre, embedding y `model_id` a un endpoint seguro de escritura; la imagen nunca se envía en ese payload.
+
 ## Seguridad del gate
 
 `gate.enabled` y `gate.allow_physical` son `false` en la configuración de ejemplo. Mientras cualquiera de ellos sea falso, cualquier solicitud devuelve `dry-run` y no se envía ninguna orden al ESP32.
