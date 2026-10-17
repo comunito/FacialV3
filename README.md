@@ -27,7 +27,7 @@ python main.py
 
 No se incluyen claves, contraseñas, fotos ni embeddings reales. `data/whitelist.csv` y `config.json` están ignorados por Git.
 
-Configura `api_token` con un valor aleatorio largo o usa `FACIAL_API_TOKEN`; las operaciones de refresh y gate requieren `X-API-Key`.
+Durante esta fase de pruebas `api_token` puede permanecer vacío y el portal queda abierto en la red local. Si se configura `api_token` o `FACIAL_API_TOKEN`, las operaciones de refresh, alta facial y gate requieren `X-API-Key`.
 
 El alta desde `/admin` procesa la selfie en memoria y registra el embedding local. Si se configura `embedding_webhook_url`, envía la selfie temporal en base64 al Apps Script de Core junto con `person_id`, nombre, embedding, `model_id`, Sheets y carpeta Drive; Apps Script sube la imagen y registra la URL resultante en Sheets. El token se toma de `FACIAL_EMBEDDING_WEBHOOK_TOKEN` y no se guarda en Git.
 
