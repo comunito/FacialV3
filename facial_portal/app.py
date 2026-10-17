@@ -7,7 +7,7 @@ from .service import RecognitionService
 
 
 def _authorized(settings: Settings, request) -> bool:
-    return bool(settings.api_token) and request.headers.get("X-API-Key", "") == settings.api_token
+    return not settings.api_token or request.headers.get("X-API-Key", "") == settings.api_token
 
 
 def create_app(settings: Settings | None = None, service: RecognitionService | None = None) -> Flask:
@@ -18,7 +18,7 @@ def create_app(settings: Settings | None = None, service: RecognitionService | N
 
     @app.get("/admin")
     def admin():
-        return render_template("admin.html", model_id=settings.recognition.model_id, drive_folder_url=settings.selfie_drive_folder_url)
+        return render_template("admin.html", model_id=settings.recognition.model_id, drive_folder_url=settings.selfie_drive_folder_url, api_token_configured=bool(settings.api_token))
 
     @app.get("/healthz")
     def healthz():
@@ -47,11 +47,12 @@ def create_app(settings: Settings | None = None, service: RecognitionService | N
             return jsonify({"error": "selfie is required"}), 400
         import cv2
         import numpy as np
-        frame = cv2.imdecode(np.frombuffer(upload.read(), dtype=np.uint8), cv2.IMREAD_COLOR)
+        selfie_bytes = upload.read()
+        frame = cv2.imdecode(np.frombuffer(selfie_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
         if frame is None:
             return jsonify({"error": "invalid image"}), 400
         try:
-            return jsonify(service.enroll(frame, request.form.get("person_id", ""), request.form.get("name", "")))
+            return jsonify(service.enroll(frame, request.form.get("person_id", ""), request.form.get("name", ""), selfie_bytes, upload.mimetype))
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
 

@@ -47,6 +47,9 @@ class Settings:
     whitelist_source: str = ""
     embedding_webhook_url: str = ""
     embedding_webhook_token: str = ""
+    embedding_spreadsheet_url: str = ""
+    embedding_spreadsheet_worksheet: str = "Embeddings"
+    selfie_drive_folder_id: str = ""
     selfie_drive_folder_url: str = ""
     webhook_urls: list[str] = field(default_factory=list)
 

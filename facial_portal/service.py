@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 import threading
+import base64
 from collections import defaultdict
 from datetime import datetime, timezone
 
@@ -37,7 +38,7 @@ class RecognitionService:
         self.audit.record("whitelist_refreshed", detail=f"identities={count}")
         return count
 
-    def enroll(self, frame, person_id: str, name: str) -> dict:
+    def enroll(self, frame, person_id: str, name: str, selfie_bytes: bytes | None = None, mime_type: str = "image/jpeg") -> dict:
         person_id = person_id.strip()
         name = name.strip()
         if not person_id or not name:
@@ -51,12 +52,26 @@ class RecognitionService:
         if self.settings.embedding_webhook_url:
             try:
                 headers = {"Authorization": f"Bearer {self.settings.embedding_webhook_token}"} if self.settings.embedding_webhook_token else {}
-                response = requests.post(self.settings.embedding_webhook_url, json={"person_id": person_id, "name": name, "embedding": features[0].tolist(), "model_id": self.settings.recognition.model_id}, headers=headers, timeout=10)
+                payload = {
+                    "action": "register_face_enrollment",
+                    "person_id": person_id,
+                    "name": name,
+                    "embedding": features[0].tolist(),
+                    "model_id": self.settings.recognition.model_id,
+                    "spreadsheet_url": self.settings.embedding_spreadsheet_url,
+                    "worksheet": self.settings.embedding_spreadsheet_worksheet,
+                    "folder_id": self.settings.selfie_drive_folder_id,
+                    "selfie_base64": base64.b64encode(selfie_bytes or b"").decode("ascii"),
+                    "mime_type": mime_type or "image/jpeg",
+                    "webhook_secret": self.settings.embedding_webhook_token,
+                }
+                response = requests.post(self.settings.embedding_webhook_url, json=payload, headers=headers, timeout=30)
                 response.raise_for_status()
+                webhook_result = response.json()
             except requests.RequestException as exc:
                 webhook_error = exc.__class__.__name__
                 self.audit.record("face_enrollment_sync_error", person_id=person_id, name=name, detail=webhook_error)
-        return {"person_id": person_id, "name": name, "model_id": self.settings.recognition.model_id, "identities": count, "sheet_sync": "sent" if self.settings.embedding_webhook_url and not webhook_error else ("error" if webhook_error else "local_only"), "sheet_sync_error": webhook_error}
+        return {"person_id": person_id, "name": name, "model_id": self.settings.recognition.model_id, "identities": count, "sheet_sync": "sent" if self.settings.embedding_webhook_url and not webhook_error else ("error" if webhook_error else "local_only"), "sheet_sync_error": webhook_error, "drive_url": (webhook_result or {}).get("drive_url", "") if self.settings.embedding_webhook_url and not webhook_error else ""}
 
     def process_frame(self, frame) -> dict:
         self.frame_count += 1

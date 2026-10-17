@@ -27,6 +27,9 @@
   },
   "whitelist_source": "data/whitelist.csv",
   "embedding_webhook_url": "",
+  "embedding_spreadsheet_url": "",
+  "embedding_spreadsheet_worksheet": "Embeddings",
+  "selfie_drive_folder_id": "",
   "selfie_drive_folder_url": "",
   "webhook_urls": []
 }

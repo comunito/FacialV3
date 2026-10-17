@@ -24,6 +24,13 @@ def test_health_and_gate_are_safe_by_default(tmp_path):
     assert response.json["opened"] is False
 
 
+def test_mutating_api_is_open_when_token_is_not_configured(tmp_path):
+    settings = Settings(data_dir=str(tmp_path), gate=GateConfig())
+    client = create_app(settings, RecognitionService(settings)).test_client()
+    response = client.post("/api/gate/pulse")
+    assert response.status_code == 409
+
+
 def test_config_round_trip(tmp_path):
     settings = Settings(data_dir=str(tmp_path))
     path = tmp_path / "config.json"
